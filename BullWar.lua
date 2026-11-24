@@ -1,26 +1,31 @@
--- BullWar: stance-aware Fury / Arms warrior helper for the 1.12 client (OctoWoW).
--- BW.Main / BW.AoE pick the Fury or Arms logic from your talents (/bw spec to override).
--- No SuperWoW needed. Each key press does at most one thing (one cast or one
--- stance change; the optional auto Bloodrage is the only extra), so you stay in control. Macros call the BW.* functions.
+-- BullWar: stance-aware warrior helper for the 1.12 client (OctoWoW): Fury, Arms, Protection.
+-- BW.Main / BW.AoE pick the logic from your talents (/bw spec to override).
+-- No SuperWoW needed. Each key press does one thing (one cast or one stance change).
+-- Exception: abilities off the global cooldown (Heroic Strike / Cleave queued by
+-- Protection, Shield Block, optional Bloodrage) can go out in the same press.
+-- Macros call the BW.* functions.
 --
 --   /run BW.Main()   Fury: Shout > Demo (elites) > Execute > Bloodthirst > Whirlwind > Overpower (in gaps) > Heroic Strike
 --                    Arms: Shout > Demo (elites) > Execute > Overpower > Mortal Strike > Rend > Whirlwind trip > Slam > Heroic Strike
 --   /run BW.AoE()    Fury: Shout > Whirlwind > Demoralizing Shout > Overpower (in gaps) > Cleave > Bloodthirst
 --                    Arms: Shout > Sweeping Strikes > Whirlwind > Demoralizing Shout > Cleave > Mortal Strike
+--   Protection (shield): Main: Shout > Revenge > Shield Slam > Concussion Blow > Demo > Sunder (+ Heroic Strike queued)
+--                        AoE:  Shout > Revenge > Thunder Clap > Demo > Shield Slam > Concussion Blow > Sunder (+ Cleave queued)
+--                        Shield Block (off the global cooldown) sets up Revenge while the target is hitting you.
 --   /run BW.Charge()      out of combat: Battle Stance + Charge; in combat: Berserker Stance + Intercept
 --   /run BW.Overpower()   go to Battle Stance (only if it wastes little rage) and Overpower
---   /run BW.Pummel()      Pummel, leaving Defensive Stance first if needed
+--   /run BW.Pummel()      interrupt: Shield Bash in Defensive Stance with a shield, otherwise Pummel
 --   /run BW.Do("Thunder Clap", "Battle Stance")       any spell with its stance
 --   /run BW.Do("Berserker Rage", "Berserker Stance", 1)  third argument 1 = switch even if rage is lost
 --
 -- Hold Shift while pressing to force a stance switch that would waste rage.
 -- Slash: /bw  (show settings), /bw hs 60, /bw cleave 40, /bw slack 10, /bw op on|off, /bw demo elite|on|off, /bw br on|off,
---        /bw spec auto|arms|fury, /bw ww on|off, /bw slam auto|on|off
+--        /bw spec auto|arms|fury|prot, /bw ww on|off, /bw slam auto|on|off, /bw ths 50, /bw sb on|off
 
 BW = {}
 
 local DEFAULTS = { hs = 60, cleave = 40, slack = 10, op = true, demo = "elite", br = false,
-  spec = "auto", ww = true, slam = "auto" }
+  spec = "auto", ww = true, slam = "auto", ths = 50, sb = true }
 local DB
 
 local BATTLE, DEFENSIVE, BERSERKER = "Battle Stance", "Defensive Stance", "Berserker Stance"
@@ -35,6 +40,7 @@ local attacking = false
 local attackTry = 0
 local opUntil = 0
 local rendTry = 0 -- last Rend attempt on the current target
+local revUntil = 0 -- Revenge usable until (after you block, dodge or parry)
 
 -- helpers -------------------------------------------------------------------
 
@@ -98,11 +104,21 @@ local function TreePoints(tab)
   return n
 end
 
--- "arms" or "fury": /bw spec arms|fury|auto (auto = the tree with more points)
+-- "arms", "fury" or "prot": /bw spec arms|fury|prot|auto (auto = the tree with most points)
 local function Spec()
-  if DB.spec == "arms" or DB.spec == "fury" then return DB.spec end
-  if TreePoints(1) > TreePoints(2) then return "arms" end
+  if DB.spec == "arms" or DB.spec == "fury" or DB.spec == "prot" then return DB.spec end
+  local a, f, p = TreePoints(1), TreePoints(2), TreePoints(3)
+  if p > a and p > f then return "prot" end
+  if a > f then return "arms" end
   return "fury"
+end
+
+-- Execute costs 15 rage, Improved Execute lowers it by 2 / 5
+local function ExecCost()
+  local rank = TalentRank(2, "Improved Execute")
+  if rank >= 2 then return 10 end
+  if rank == 1 then return 13 end
+  return 15
 end
 
 local function CanSwitch()
@@ -215,29 +231,36 @@ end
 
 -- public buttons ------------------------------------------------------------
 
+-- Fury lives in Berserker Stance; before it is learned (level 30), Battle Stance
+local function FuryHome()
+  if Known(BERSERKER) then return BERSERKER end
+  return BATTLE
+end
+
 local function FuryMain()
   StartAttack()
   UseBloodrage()
   local st, r = Stance(), Rage()
+  local home = FuryHome()
   local inCombat = UnitAffectingCombat("player")
   local exec = HasEnemy() and TargetPct() <= 20
 
   if not exec and NeedShout() then return Cast("Battle Shout") end
-  if st == DEFENSIVE and CanSwitch() then return Cast(BERSERKER) end
+  if st == DEFENSIVE and CanSwitch() then return Cast(home) end
   if NeedDemo() then return Cast("Demoralizing Shout") end
-  if exec and r >= 10 and st ~= DEFENSIVE then return Cast("Execute") end
+  if exec and r >= ExecCost() and st ~= DEFENSIVE then return Cast("Execute") end
   if st == BATTLE and OPReady() then return Cast("Overpower") end
   -- go home to Berserker Stance once little rage would be lost
-  if st ~= BERSERKER and inCombat and CanSwitch() then return Cast(BERSERKER) end
+  if st ~= home and inCombat and CanSwitch() then return Cast(home) end
 
   if r >= 30 and Ready("Bloodthirst") then return Cast("Bloodthirst") end
 
-  if st == BERSERKER then
+  if st == home then
     -- Whirlwind, but do not starve a Bloodthirst that is about to come back
-    if r >= 25 and Ready("Whirlwind") and (Remaining("Bloodthirst") > 1.5 or r >= 55) then
+    if st == BERSERKER and r >= 25 and Ready("Whirlwind") and (Remaining("Bloodthirst") > 1.5 or r >= 55) then
       return Cast("Whirlwind")
     end
-    if GoOverpower(2) then return Cast(BATTLE) end
+    if st == BERSERKER and GoOverpower(2) then return Cast(BATTLE) end
     if r >= DB.hs and not Queued(TEX_HS) then return Cast("Heroic Strike") end
   elseif inCombat and r >= 15 and not Queued(TEX_HS) then
     -- stuck outside Berserker with too much rage to switch: spend it, then switch
@@ -249,19 +272,20 @@ local function FuryAoE()
   StartAttack()
   UseBloodrage()
   local st, r = Stance(), Rage()
+  local home = FuryHome()
   local inCombat = UnitAffectingCombat("player")
   local zerk = (st == BERSERKER)
 
   if NeedShout() then return Cast("Battle Shout") end
   if st == BATTLE and OPReady() then return Cast("Overpower") end
-  if not zerk and inCombat and CanSwitch() then return Cast(BERSERKER) end
+  if st ~= home and inCombat and CanSwitch() then return Cast(home) end
   if zerk and r >= 25 and Ready("Whirlwind") then return Cast("Whirlwind") end
   if HasEnemy() and r >= 10 and Known("Demoralizing Shout") and not TargetHasDebuff(TEX_DEMO) then
     return Cast("Demoralizing Shout")
   end
   if zerk and GoOverpower(3) then return Cast(BATTLE) end
   -- Cleave, keeping 25 rage for a Whirlwind that is about to come back
-  local cleaveOK = (not zerk and inCombat and r >= 20)
+  local cleaveOK = (st ~= home and inCombat and r >= 20)
     or (r >= DB.cleave and (Remaining("Whirlwind") > 2 or r >= 45))
   if cleaveOK and not Queued(TEX_CLEAVE) then return Cast("Cleave") end
   if r >= 30 and Ready("Bloodthirst") and (not zerk or Remaining("Whirlwind") > 3) then
@@ -281,7 +305,8 @@ end
 
 local function NeedRend()
   return HasEnemy() and Known("Rend") and Rage() >= 10 and TargetPct() > 30
-    and not TargetHasDebuff(TEX_REND) and GetTime() - rendTry > 20
+    and CheckInteractDistance("target", 3) and not TargetHasDebuff(TEX_REND)
+    and GetTime() - rendTry > 20
 end
 
 -- go to Berserker for one Whirlwind: Mortal Strike not due soon, little rage lost
@@ -299,7 +324,7 @@ local function ArmsMain()
 
   if not exec and NeedShout() then return Cast("Battle Shout") end
   if NeedDemo() then return Cast("Demoralizing Shout") end
-  if exec and r >= 10 and st ~= DEFENSIVE then return Cast("Execute") end
+  if exec and r >= ExecCost() and st ~= DEFENSIVE then return Cast("Execute") end
 
   if st == BERSERKER then
     -- the Whirlwind trip: use it, then go home
@@ -352,13 +377,115 @@ local function ArmsAoE()
   if r >= 30 and Ready("Mortal Strike") and Remaining("Whirlwind") > 3 then return Cast("Mortal Strike") end
 end
 
+
+-- Protection (shield tank): home is Defensive Stance.
+-- Taunts, target switching, interrupts and survival cooldowns stay manual.
+
+local function HasShield()
+  local link = GetInventoryItemLink("player", 17)
+  if not link then return false end
+  local _, _, id = string.find(link, "item:(%d+)")
+  if not id then return false end
+  local _, _, _, _, _, sub = GetItemInfo(tonumber(id))
+  return sub == "Shields"
+end
+
+local function RevReady()
+  return GetTime() < revUntil and Ready("Revenge") and Rage() >= 5
+end
+
+local function TankingTarget()
+  return UnitExists("targettarget") and UnitIsUnit("targettarget", "player")
+end
+
+-- Shield Block (off the global cooldown). On this server it blocks only one
+-- attack, so its main value is the guaranteed block that opens Revenge:
+-- use it while the target is hitting you, Revenge is (almost) off cooldown
+-- but not open yet, and enough rage stays for the next attack.
+local function UseShieldBlock(st, shield)
+  if DB.sb and st == DEFENSIVE and shield and Ready("Shield Block") and Rage() >= 30
+    and TankingTarget() and GetTime() >= revUntil
+    and (not Known("Revenge") or Remaining("Revenge") <= 1.5) then
+    CastSpellByName("Shield Block")
+  end
+end
+
+-- Heroic Strike / Cleave are on-next-swing (no global cooldown): queue it
+-- and still use this press for a normal attack
+local function QueueSwing(name, tex, minRage)
+  if Rage() >= minRage and not Queued(tex) then CastSpellByName(name) end
+end
+
+-- A tank must be in Defensive Stance (threat, Revenge, Shield Block), and taking
+-- hits keeps refilling rage, so waiting for rage to drop could take forever.
+-- With surplus rage, spend it on one Shield Slam first; otherwise switch now.
+local function ProtCommon(st, inCombat, shield)
+  if NeedShout() then return Cast("Battle Shout") end
+  if st ~= DEFENSIVE and inCombat then
+    if not CanSwitch() and shield and Rage() >= 20 and Ready("Shield Slam") then
+      return Cast("Shield Slam")
+    end
+    return Cast(DEFENSIVE)
+  end
+  return false
+end
+
+local function ProtMain()
+  StartAttack()
+  UseBloodrage()
+  local st, r = Stance(), Rage()
+  local inCombat = UnitAffectingCombat("player")
+  local shield = HasShield()
+  UseShieldBlock(st, shield)
+
+  if ProtCommon(st, inCombat, shield) then return end
+  if st == DEFENSIVE and RevReady() then return Cast("Revenge") end
+  if shield and r >= 20 and Ready("Shield Slam") then return Cast("Shield Slam") end
+  if HasEnemy() and Ready("Concussion Blow") then return Cast("Concussion Blow") end
+  if HasEnemy() and r >= 10 and Known("Demoralizing Shout") and not TargetHasDebuff(TEX_DEMO) then
+    return Cast("Demoralizing Shout")
+  end
+
+  -- keep 20 rage for a Shield Slam that is about to come back
+  local reserve = 0
+  if shield and Known("Shield Slam") and Remaining("Shield Slam") < 1.5 then reserve = 20 end
+  QueueSwing("Heroic Strike", TEX_HS, DB.ths + reserve)
+  if HasEnemy() and r >= 10 + reserve then
+    return Cast("Sunder Armor") -- builds 5 stacks, keeps them up, and is the threat filler
+  end
+end
+
+local function ProtAoE()
+  StartAttack()
+  UseBloodrage()
+  local st, r = Stance(), Rage()
+  local inCombat = UnitAffectingCombat("player")
+  local shield = HasShield()
+  UseShieldBlock(st, shield)
+
+  if ProtCommon(st, inCombat, shield) then return end
+  if st == DEFENSIVE and RevReady() then return Cast("Revenge") end
+  if st ~= BERSERKER and inCombat and r >= 20 and Ready("Thunder Clap") then return Cast("Thunder Clap") end
+  if HasEnemy() and r >= 10 and Known("Demoralizing Shout") and not TargetHasDebuff(TEX_DEMO) then
+    return Cast("Demoralizing Shout")
+  end
+  QueueSwing("Cleave", TEX_CLEAVE, DB.cleave)
+  if shield and r >= 20 and Ready("Shield Slam") then return Cast("Shield Slam") end
+  if HasEnemy() and Ready("Concussion Blow") then return Cast("Concussion Blow") end
+  if HasEnemy() and r >= 10 then return Cast("Sunder Armor") end
+end
+
 function BW.Main()
-  if Spec() == "arms" then return ArmsMain() end
+  local sp = Spec()
+  if sp == "prot" then return ProtMain() end
+  if sp == "arms" then return ArmsMain() end
   return FuryMain()
 end
 
 function BW.AoE()
-  if Spec() == "arms" then return ArmsAoE() end
+  local sp = Spec()
+  if sp == "prot" then return ProtAoE() end
+  if sp == "arms" then return ArmsAoE() end
   return FuryAoE()
 end
 
@@ -367,6 +494,7 @@ function BW.Charge()
     if GoStance(BATTLE, true) then return end
     Cast("Charge")
   else
+    if not Known("Intercept") then return end
     if GoStance(BERSERKER, true) then return end
     Cast("Intercept")
   end
@@ -384,8 +512,14 @@ function BW.Overpower()
 end
 
 function BW.Pummel()
-  if Stance() == DEFENSIVE then return GoStance(BERSERKER, true) end
-  Cast("Pummel")
+  local st = Stance()
+  if st == DEFENSIVE then
+    -- a tank keeps Defensive Stance and uses Shield Bash
+    if HasShield() and Known("Shield Bash") then return Cast("Shield Bash") end
+    return GoStance(Known(BERSERKER) and BERSERKER or BATTLE, true)
+  end
+  if Known("Pummel") then return Cast("Pummel") end
+  if HasShield() and Known("Shield Bash") then return Cast("Shield Bash") end
 end
 
 function BW.Do(spell, stance, force)
@@ -405,6 +539,9 @@ f:RegisterEvent("PLAYER_LEAVE_COMBAT")
 f:RegisterEvent("PLAYER_TARGET_CHANGED")
 f:RegisterEvent("CHAT_MSG_COMBAT_SELF_MISSES")
 f:RegisterEvent("CHAT_MSG_SPELL_SELF_DAMAGE")
+f:RegisterEvent("CHAT_MSG_COMBAT_CREATURE_VS_SELF_MISSES")
+f:RegisterEvent("CHAT_MSG_COMBAT_CREATURE_VS_SELF_HITS")
+f:RegisterEvent("CHAT_MSG_SPELL_CREATURE_VS_SELF_DAMAGE")
 f:SetScript("OnEvent", function()
   if event == "ADDON_LOADED" and arg1 == "BullWar" then
     BullWarDB = BullWarDB or {}
@@ -421,7 +558,15 @@ f:SetScript("OnEvent", function()
   elseif event == "PLAYER_TARGET_CHANGED" then
     opUntil = 0
     rendTry = 0
-  elseif arg1 then
+  elseif not arg1 then
+    return
+  elseif event == "CHAT_MSG_COMBAT_CREATURE_VS_SELF_MISSES" or event == "CHAT_MSG_COMBAT_CREATURE_VS_SELF_HITS"
+      or event == "CHAT_MSG_SPELL_CREATURE_VS_SELF_DAMAGE" then
+    -- "X attacks. You block." / "X hits you for 50. (20 blocked)" / "X attacks. You dodge."
+    if string.find(arg1, "You dodge") or string.find(arg1, "You parry") or string.find(arg1, "[Bb]lock") then
+      revUntil = GetTime() + 5
+    end
+  else
     -- "You attack. X dodges." / "Your Bloodthirst was dodged by X."
     -- only dodges by the current target open Overpower on it
     local tname = UnitName("target")
@@ -429,6 +574,7 @@ f:SetScript("OnEvent", function()
       opUntil = GetTime() + 5
     end
     if event == "CHAT_MSG_SPELL_SELF_DAMAGE" and string.find(arg1, "^Your Overpower") then opUntil = 0 end
+    if event == "CHAT_MSG_SPELL_SELF_DAMAGE" and string.find(arg1, "^Your Revenge") then revUntil = 0 end
   end
 end)
 
@@ -446,7 +592,12 @@ SlashCmdList["BULLWAR"] = function(msg)
     DB.br = (val == "on")
   elseif key == "ww" then
     DB.ww = (val == "on")
-  elseif key == "spec" and (val == "arms" or val == "fury" or val == "auto") then
+  elseif key == "ths" then
+    local n = tonumber(val)
+    if n then DB.ths = n end
+  elseif key == "sb" then
+    DB.sb = (val == "on")
+  elseif key == "spec" and (val == "arms" or val == "fury" or val == "prot" or val == "auto") then
     DB.spec = val
   elseif key == "slam" and (val == "on" or val == "off" or val == "auto") then
     DB.slam = val
@@ -455,6 +606,8 @@ SlashCmdList["BULLWAR"] = function(msg)
   end
   DEFAULT_CHAT_FRAME:AddMessage(string.format("BullWar: spec %s (setting %s), Arms Whirlwind trips %s, Slam %s (%s)",
     Spec(), DB.spec, DB.ww and "on" or "off", UseSlam() and "on" or "off", DB.slam))
+  DEFAULT_CHAT_FRAME:AddMessage(string.format("BullWar: Prot Heroic Strike at %d rage, auto Shield Block %s",
+    DB.ths, DB.sb and "on" or "off"))
   DEFAULT_CHAT_FRAME:AddMessage(string.format(
     "BullWar: HS at %d rage, Cleave at %d, stance slack %d (Tactical Mastery keeps %d), Overpower %s, single-target Demo %s, auto Bloodrage %s",
     DB.hs, DB.cleave, DB.slack, Retain(), DB.op and "on" or "off", DB.demo, DB.br and "on" or "off"))
