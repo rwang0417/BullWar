@@ -1,0 +1,7 @@
+## Interface: 11200
+## Title: BullWar
+## Notes: Stance-aware Fury warrior helper. Every action still needs your key press.
+## Author: Abao
+## Version: 0.1
+## SavedVariablesPerCharacter: BullWarDB
+BullWar.lua
