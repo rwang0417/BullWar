@@ -1,8 +1,8 @@
 -- BullWar: stance-aware warrior helper for the 1.12 client (OctoWoW): Fury, Arms, Protection.
 -- BW.Main / BW.AoE pick the logic from your talents (/bw spec to override).
 -- No SuperWoW needed. Each key press does one thing (one cast or one stance change).
--- Exception: abilities off the global cooldown (Heroic Strike / Cleave queued by
--- Protection, Shield Block, optional Bloodrage) can go out in the same press.
+-- Exception: abilities off the global cooldown (Cleave in multi-target mode,
+-- Heroic Strike for Protection, Shield Block, optional Bloodrage) can go out in the same press.
 -- Macros call the BW.* functions.
 --
 --   /run BW.Main()   Fury: Shout > Demo (elites) > Execute > Bloodthirst > Whirlwind > Overpower (in gaps) > Heroic Strike
@@ -19,12 +19,12 @@
 --   /run BW.Do("Berserker Rage", "Berserker Stance", 1)  third argument 1 = switch even if rage is lost
 --
 -- Hold Shift while pressing to force a stance switch that would waste rage.
--- Slash: /bw  (show settings), /bw hs 60, /bw cleave 40, /bw slack 10, /bw op on|off, /bw demo elite|on|off, /bw br on|off,
+-- Slash: /bw  (show settings), /bw hs 60, /bw cleave 20, /bw slack 10, /bw op on|off, /bw demo elite|on|off, /bw br on|off,
 --        /bw spec auto|arms|fury|prot, /bw ww on|off, /bw slam auto|on|off, /bw ths 50, /bw sb on|off
 
 BW = {}
 
-local DEFAULTS = { hs = 60, cleave = 40, slack = 10, op = true, demo = "elite", br = false,
+local DEFAULTS = { hs = 60, cleave = 20, slack = 10, op = true, demo = "elite", br = false,
   spec = "auto", ww = true, slam = "auto", ths = 50, sb = true }
 local DB
 
@@ -229,6 +229,22 @@ local function UseBloodrage()
   end
 end
 
+-- Cleave is on-next-swing (no global cooldown), so it is queued next to the
+-- normal attack of this press instead of using the press up. It keeps 25 rage
+-- for a Whirlwind due within 2 s. Returns the rage left once Cleave is paid.
+local function QueueCleave(r)
+  if not Known("Cleave") then return r end
+  local cost = 18 - TalentRank(2, "Ravager")
+  if Queued(TEX_CLEAVE) then return r - cost end
+  local keep = 0
+  if Known("Whirlwind") and Remaining("Whirlwind") <= 2 then keep = 25 end
+  if r >= math.max(DB.cleave, cost) + keep then
+    CastSpellByName("Cleave")
+    return r - cost
+  end
+  return r
+end
+
 -- public buttons ------------------------------------------------------------
 
 -- Fury lives in Berserker Stance; before it is learned (level 30), Battle Stance
@@ -284,11 +300,10 @@ local function FuryAoE()
     return Cast("Demoralizing Shout")
   end
   if zerk and GoOverpower(3) then return Cast(BATTLE) end
-  -- Cleave, keeping 25 rage for a Whirlwind that is about to come back
-  local cleaveOK = (st ~= home and inCombat and r >= 20)
-    or (r >= DB.cleave and (Remaining("Whirlwind") > 2 or r >= 45))
-  if cleaveOK and not Queued(TEX_CLEAVE) then return Cast("Cleave") end
-  if r >= 30 and Ready("Bloodthirst") and (not zerk or Remaining("Whirlwind") > 3) then
+  -- on several targets Cleave gives more damage per rage than Bloodthirst and
+  -- costs no global cooldown, so it comes first; Bloodthirst gets what is left
+  local spare = QueueCleave(r)
+  if spare >= 30 and Ready("Bloodthirst") and (not zerk or Remaining("Whirlwind") > 3) then
     return Cast("Bloodthirst")
   end
 end
@@ -372,9 +387,8 @@ local function ArmsAoE()
   if HasEnemy() and r >= 10 and Known("Demoralizing Shout") and not TargetHasDebuff(TEX_DEMO) then
     return Cast("Demoralizing Shout")
   end
-  local cleaveOK = r >= DB.cleave and (Remaining("Whirlwind") > 2 or r >= 45)
-  if cleaveOK and not Queued(TEX_CLEAVE) then return Cast("Cleave") end
-  if r >= 30 and Ready("Mortal Strike") and Remaining("Whirlwind") > 3 then return Cast("Mortal Strike") end
+  local spare = QueueCleave(r)
+  if spare >= 30 and Ready("Mortal Strike") and Remaining("Whirlwind") > 3 then return Cast("Mortal Strike") end
 end
 
 
@@ -469,7 +483,7 @@ local function ProtAoE()
   if HasEnemy() and r >= 10 and Known("Demoralizing Shout") and not TargetHasDebuff(TEX_DEMO) then
     return Cast("Demoralizing Shout")
   end
-  QueueSwing("Cleave", TEX_CLEAVE, DB.cleave)
+  QueueSwing("Cleave", TEX_CLEAVE, DB.cleave + 20) -- tanks keep 20 for Shield Slam / Thunder Clap
   if shield and r >= 20 and Ready("Shield Slam") then return Cast("Shield Slam") end
   if HasEnemy() and Ready("Concussion Blow") then return Cast("Concussion Blow") end
   if HasEnemy() and r >= 10 then return Cast("Sunder Armor") end
@@ -547,6 +561,10 @@ f:SetScript("OnEvent", function()
     BullWarDB = BullWarDB or {}
     for k, v in pairs(DEFAULTS) do
       if BullWarDB[k] == nil then BullWarDB[k] = v end
+    end
+    if BullWarDB.v ~= 2 then
+      if BullWarDB.cleave == 40 then BullWarDB.cleave = 20 end -- old default
+      BullWarDB.v = 2
     end
     DB = BullWarDB
   elseif event == "PLAYER_ENTERING_WORLD" or event == "SPELLS_CHANGED" or event == "LEARNED_SPELL_IN_TAB" then

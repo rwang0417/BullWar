@@ -9,7 +9,7 @@
 OctoWoW / Turtle WoW（1.12 客户端）战士助手，支持狂暴战、武器战和防战。有单体和多目标两种模式，按天赋自动选择循环，并自动切换姿态。
 
 - 不需要 SuperWoW。
-- 按一次键只做一件事（放一个技能或切一次姿态），每一下都要你自己按。例外：不占公共冷却的技能（Heroic Strike、Cleave、Shield Block、可选的 Bloodrage）可能和另一个技能在同一下里一起放。
+- 按一次键只做一件事（放一个技能或切一次姿态），每一下都要你自己按。例外：不占公共冷却的技能（多目标模式的 Cleave、防战的 Heroic Strike、Shield Block、可选的 Bloodrage）可能和另一个技能在同一下里一起放。
 - 切姿态时会算怒气：只有亏得不多时才自动切，否则先把怒气用掉。
 
 ### 安装
@@ -43,11 +43,11 @@ OctoWoW / Turtle WoW（1.12 客户端）战士助手，支持狂暴战、武器�
 
 **狂暴战**（主场 Berserker Stance）
 - 单体：Battle Shout > Demoralizing Shout（只对精英和稀有怪）> Execute（目标 20% 血以下）> Bloodthirst > Whirlwind > Overpower（只在空档里切去打）> Heroic Strike（怒气 60 以上）
-- 多目标：Battle Shout > Whirlwind > Demoralizing Shout > Overpower（空档）> Cleave > Bloodthirst
+- 多目标：Battle Shout > Whirlwind > Demoralizing Shout > Overpower（空档）> Bloodthirst。Cleave 不占公共冷却，怒气 20 以上就排上（Whirlwind 2 秒内要转好时先留 25 点给它），打多个目标时它比 Bloodthirst 更省怒气，所以优先。
 
 **武器战**（主场 Battle Stance，双手武器）
 - 单体：Battle Shout > Demoralizing Shout（精英）> Execute > Overpower > Mortal Strike > Rend > 去 Berserker Stance 打一次 Whirlwind 再回来 > Slam（点了 Improved Slam 才用）> Heroic Strike
-- 多目标：Battle Shout > Sweeping Strikes > Whirlwind > Demoralizing Shout > Cleave > Mortal Strike
+- 多目标：Battle Shout > Sweeping Strikes > Whirlwind > Demoralizing Shout > Mortal Strike，Cleave 规则同狂暴战。
 - Master Strike 不自动放，伤害低，价值在控制效果，请自己按。
 
 **防战**（主场 Defensive Stance，拿盾，适合高等级防护天赋，5 人本和团本）
@@ -76,7 +76,7 @@ Heroic Strike 和 Cleave（任意一条、任意一页都行）。插件靠它�
 | `/bw` | 查看当前设置 |
 | `/bw spec auto\|arms\|fury\|prot` | 天赋逻辑：自动识别或手动指定 |
 | `/bw hs 60` | 输出天赋 Heroic Strike 的怒气阈值 |
-| `/bw cleave 40` | 多目标 Cleave 的怒气阈值 |
+| `/bw cleave 20` | 多目标 Cleave 排上的最低怒气（防战在此基础上多留 20） |
 | `/bw slack 10` | 切姿态时允许亏的怒气 |
 | `/bw op on\|off` | 狂暴战在空档里切去打 Overpower |
 | `/bw demo elite\|on\|off` | 输出天赋单体时的 Demoralizing Shout：只对精英 / 全部 / 不放 |
@@ -93,7 +93,7 @@ Heroic Strike 和 Cleave（任意一条、任意一页都行）。插件靠它�
 Stance-aware warrior helper for OctoWoW / Turtle WoW (1.12 client), supporting Fury, Arms and Protection. Single-target and multi-target modes, picks the rotation from your talents and switches stances automatically.
 
 - No SuperWoW needed.
-- Each key press does one thing (one ability or one stance change), and every action needs your key press. Exception: abilities off the global cooldown (Heroic Strike, Cleave, Shield Block, optional Bloodrage) may go out in the same press as another ability.
+- Each key press does one thing (one ability or one stance change), and every action needs your key press. Exception: abilities off the global cooldown (Cleave in multi-target mode, Heroic Strike for Protection, Shield Block, optional Bloodrage) may go out in the same press as another ability.
 - Stance changes are rage-aware: the addon switches automatically only when little rage is lost, otherwise it spends rage first.
 
 ### Installation
@@ -127,11 +127,11 @@ Any other stance-bound ability works with `/run BW.Do("Spell Name","Stance Name"
 
 **Fury** (home: Berserker Stance)
 - Single target: Battle Shout > Demoralizing Shout (elites and rares only) > Execute (target below 20%) > Bloodthirst > Whirlwind > Overpower (only in gaps) > Heroic Strike (60+ rage)
-- Multi-target: Battle Shout > Whirlwind > Demoralizing Shout > Overpower (gaps) > Cleave > Bloodthirst
+- Multi-target: Battle Shout > Whirlwind > Demoralizing Shout > Overpower (gaps) > Bloodthirst. Cleave is off the global cooldown and is queued at 20+ rage (keeping 25 for a Whirlwind due within 2 seconds); on several targets it gives more damage per rage than Bloodthirst, so it comes first.
 
 **Arms** (home: Battle Stance, two-handed weapon)
 - Single target: Battle Shout > Demoralizing Shout (elites) > Execute > Overpower > Mortal Strike > Rend > one Whirlwind in Berserker Stance, then back > Slam (only with Improved Slam) > Heroic Strike
-- Multi-target: Battle Shout > Sweeping Strikes > Whirlwind > Demoralizing Shout > Cleave > Mortal Strike
+- Multi-target: Battle Shout > Sweeping Strikes > Whirlwind > Demoralizing Shout > Mortal Strike, with Cleave handled as for Fury.
 - Master Strike is not automated: low damage, its value is the control effect, so press it yourself.
 
 **Protection** (home: Defensive Stance, shield, for high-level Protection builds in 5-player dungeons and raids)
@@ -160,7 +160,7 @@ Heroic Strike and Cleave (any bar, any page). The addon uses them to tell whethe
 | `/bw` | Show current settings |
 | `/bw spec auto\|arms\|fury\|prot` | Talent logic: automatic or fixed |
 | `/bw hs 60` | Heroic Strike rage threshold (Fury / Arms) |
-| `/bw cleave 40` | Cleave rage threshold (multi-target) |
+| `/bw cleave 20` | Minimum rage to queue Cleave in multi-target mode (Protection keeps 20 more) |
 | `/bw slack 10` | Rage you accept losing on a stance change |
 | `/bw op on\|off` | Fury: switch to Battle Stance for Overpower in gaps |
 | `/bw demo elite\|on\|off` | Fury / Arms single target Demoralizing Shout: elites only / always / never |
